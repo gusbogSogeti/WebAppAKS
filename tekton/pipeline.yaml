@@ -51,6 +51,8 @@ spec:
           value: $(params.git-revision)
         - name: deleteExisting
           value: "true"
+        - name: subdirectory
+          value: ""
 
     # Task 2: Build and push Docker image
     - name: build-push-image
@@ -67,9 +69,9 @@ spec:
         - name: IMAGE
           value: $(params.image-registry)/$(params.image-name):$(tasks.fetch-repository.results.commit)
         - name: DOCKERFILE
-          value: ./AksWebApp/Dockerfile
+          value: AksWebApp/Dockerfile
         - name: CONTEXT
-          value: ./AksWebApp
+          value: AksWebApp
         - name: EXTRA_ARGS
           value:
             - --destination=$(params.image-registry)/$(params.image-name):latest
@@ -90,9 +92,9 @@ spec:
         - name: release_namespace
           value: $(params.deployment-namespace)
         - name: chart_path
-          value: ./helm/aks-webapp
+          value: helm/aks-webapp
         - name: values_file
-          value: ./helm/aks-webapp/values.yaml
+          value: helm/aks-webapp/values.yaml
         - name: overwrite_values
           value: image.tag=$(tasks.fetch-repository.results.commit)
 

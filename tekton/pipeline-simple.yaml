@@ -1,0 +1,152 @@
+apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  name: aks-webapp-build-deploy
+  namespace: default
+spec:
+  params:
+    - name: git-url
+      type: string
+      description: Git repository URL
+      default: https://github.com/gusbogSogeti/WebAppAKS.git
+    - name: git-revision
+      type: string
+      description: Git revision to build
+      default: main
+    - name: image
+      type: string
+      description: Full image reference
+      default: aksgbo.azurecr.io/aks-webapp
+    - name: helm-release-name
+      type: string
+      description: Helm release name
+      default: aks-webapp
+
+  workspaces:
+    - name: shared-data
+      description: Workspace for source code
+
+  tasks:
+    # Task 1: Clone and Build in one step
+    - name: clone-build-push
+      taskSpec:
+        params:
+          - name: git-url
+            type: string
+          - name: git-revision
+            type: string
+          - name: image
+            type: string
+        results:
+          - name: commit
+            description: The commit SHA
+          - name: image-url
+            description: The built image URL
+        workspaces:
+          - name: source
+        steps:
+          - name: clone
+            image: alpine/git:2.40.1
+            script: |
+              #!/bin/sh
+              set -ex
+              cd $(workspaces.source.path)
+              git clone --depth 1 --branch $(params.git-revision) $(params.git-url) .
+              COMMIT=$(git rev-parse HEAD)
+              echo -n "$COMMIT" > $(results.commit.path)
+              # Write commit to a file that kaniko can read
+              echo -n "$COMMIT" > $(workspaces.source.path)/.commit
+              echo "Cloned commit: $COMMIT"
+              ls -la
+
+          - name: build-and-push
+            image: gcr.io/kaniko-project/executor:v1.9.1
+            env:
+              - name: DOCKER_CONFIG
+                value: /kaniko/.docker
+            command:
+              - /kaniko/executor
+            args:
+              - --dockerfile=$(workspaces.source.path)/AksWebApp/Dockerfile
+              - --context=$(workspaces.source.path)/AksWebApp
+              - --destination=$(params.image):latest
+            securityContext:
+              runAsUser: 0
+            volumeMounts:
+              - name: docker-config
+                mountPath: /kaniko/.docker
+
+          - name: output-url
+            image: alpine:3.18
+            script: |
+              #!/bin/sh
+              COMMIT=$(cat $(results.commit.path))
+              echo -n "$(params.image):$COMMIT" > $(results.image-url.path)
+              echo "Built image: $(params.image):$COMMIT"
+        volumes:
+          - name: docker-config
+            secret:
+              secretName: acr-credentials
+              items:
+                - key: .dockerconfigjson
+                  path: config.json
+      params:
+        - name: git-url
+          value: $(params.git-url)
+        - name: git-revision
+          value: $(params.git-revision)
+        - name: image
+          value: $(params.image)
+      workspaces:
+        - name: source
+          workspace: shared-data
+
+    # Task 2: Deploy with Helm
+    - name: deploy
+      runAfter:
+        - clone-build-push
+      taskSpec:
+        params:
+          - name: release-name
+            type: string
+          - name: image-tag
+            type: string
+          - name: git-url
+            type: string
+        workspaces:
+          - name: source
+        steps:
+          - name: clone-for-helm
+            image: alpine/git:2.40.1
+            script: |
+              #!/bin/sh
+              set -ex
+              cd $(workspaces.source.path)
+              if [ ! -d ".git" ]; then
+                git clone --depth 1 $(params.git-url) .
+              fi
+              ls -la
+
+          - name: helm-deploy
+            image: alpine/helm:3.12.0
+            script: |
+              #!/bin/sh
+              set -ex
+              cd $(workspaces.source.path)
+              ls -la
+              helm upgrade --install $(params.release-name) ./helm/aks-webapp \
+                --set image.tag=latest \
+                --wait \
+                --timeout 5m
+              echo "Deployment complete!"
+              helm list
+      params:
+        - name: release-name
+          value: $(params.helm-release-name)
+        - name: image-tag
+          value: $(tasks.clone-build-push.results.commit)
+        - name: git-url
+          value: $(params.git-url)
+      workspaces:
+        - name: source
+          workspace: shared-data

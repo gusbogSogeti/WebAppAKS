@@ -11,7 +11,7 @@ spec:
     name: aks-webapp-pipeline
   params:
     - name: git-url
-      value: https://github.com/gbogerSogeti/WebAppAKS.git  # Uppdatera till din GitHub URL
+      value: https://github.com/gusbogSogeti/WebAppAKS.git  # Uppdatera till din GitHub URL
     - name: git-revision
       value: main
     - name: image-registry
