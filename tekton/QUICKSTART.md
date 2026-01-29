@@ -1,5 +1,13 @@
 # Tekton Quickstart Guide
 
+Denna guide visar hur du snabbt kommer igång med Tekton för AKS WebApp.
+
+## Förutsättningar
+
+- AKS-kluster konfigurerat (`kubectl` fungerar)
+- Azure Container Registry (aksgbo.azurecr.io)
+- Helm installerat
+
 ## Steg 1: Installera Tekton i AKS
 
 ```powershell
@@ -9,31 +17,11 @@ kubectl apply -f https://storage.googleapis.com/tekton-releases/pipeline/latest/
 # Vänta tills alla pods är ready
 kubectl wait --for=condition=ready pod --all -n tekton-pipelines --timeout=300s
 
-# Installera Tekton Triggers (för GitHub webhooks)
-kubectl apply -f https://storage.googleapis.com/tekton-releases/triggers/latest/release.yaml
-kubectl apply -f https://storage.googleapis.com/tekton-releases/triggers/latest/interceptors.yaml
-
-# Vänta på triggers
-kubectl wait --for=condition=ready pod --all -n tekton-pipelines --timeout=300s
-
-# Installera Tekton Dashboard (valfritt men rekommenderat)
+# Installera Tekton Dashboard (rekommenderat)
 kubectl apply -f https://storage.googleapis.com/tekton-releases/dashboard/latest/release.yaml
 ```
 
-## Steg 2: Installera ClusterTasks
-
-```powershell
-# Git Clone task
-kubectl apply -f https://raw.githubusercontent.com/tektoncd/catalog/main/task/git-clone/0.9/git-clone.yaml
-
-# Kaniko task (för Docker builds)
-kubectl apply -f https://raw.githubusercontent.com/tektoncd/catalog/main/task/kaniko/0.6/kaniko.yaml
-
-# Kubernetes actions
-kubectl apply -f https://raw.githubusercontent.com/tektoncd/catalog/main/task/kubernetes-actions/0.2/kubernetes-actions.yaml
-```
-
-## Steg 3: Skapa ACR Credentials Secret
+## Steg 2: Skapa ACR Credentials Secret
 
 ```powershell
 # Hämta ACR credentials från Azure
@@ -52,194 +40,113 @@ kubectl create secret docker-registry acr-credentials `
 kubectl get secret acr-credentials
 ```
 
-## Steg 4: Installera Projekt-resurser
+## Steg 3: Installera Pipeline-resurser
 
 ```powershell
 # Från projekt-roten
 cd C:\Users\gboger\source\repos\WebAppAKS
 
-# Installera RBAC
-kubectl apply -f tekton/rbac.yaml
+# Installera ServiceAccount med RBAC (krävs för Helm)
+kubectl apply -f tekton/serviceaccount.yaml
 
-# Installera custom tasks
-kubectl apply -f tekton/task-helm-upgrade.yaml
+# Installera den fungerande pipelinen
+kubectl apply -f tekton/pipeline-simple.yaml
 
-# Installera pipeline
-kubectl apply -f tekton/pipeline.yaml
-
-# Verifiera installation
+# Verifiera
 kubectl get pipelines
-kubectl get tasks
+kubectl get serviceaccounts tekton-build-sa
 ```
 
-## Steg 5: Kör Pipeline Manuellt
+## Steg 4: Kör Pipeline
 
 ```powershell
 # Skapa en PipelineRun
-kubectl create -f - <<EOF
-apiVersion: tekton.dev/v1beta1
-kind: PipelineRun
-metadata:
-  name: aks-webapp-run-manual
-  namespace: default
-spec:
-  pipelineRef:
-    name: aks-webapp-pipeline
-  params:
-    - name: git-url
-      value: https://github.com/YOUR_USERNAME/WebAppAKS.git
-    - name: git-revision
-      value: main
-  workspaces:
-    - name: shared-workspace
-      volumeClaimTemplate:
-        spec:
-          accessModes:
-            - ReadWriteOnce
-          resources:
-            requests:
-              storage: 1Gi
-    - name: docker-credentials
-      secret:
-        secretName: acr-credentials
-EOF
-```
+kubectl create -f tekton/test-pipelinerun.yaml
 
-Eller använd PowerShell:
+# Följ loggar (kräver tkn CLI)
+tkn pipelinerun logs -f --last
 
-```powershell
-# Skapa en temporär YAML-fil
-@"
-apiVersion: tekton.dev/v1beta1
-kind: PipelineRun
-metadata:
-  name: aks-webapp-run-$(Get-Date -Format 'yyyyMMdd-HHmmss')
-  namespace: default
-spec:
-  pipelineRef:
-    name: aks-webapp-pipeline
-  params:
-    - name: git-url
-      value: https://github.com/YOUR_USERNAME/WebAppAKS.git
-    - name: git-revision
-      value: main
-  workspaces:
-    - name: shared-workspace
-      volumeClaimTemplate:
-        spec:
-          accessModes:
-            - ReadWriteOnce
-          resources:
-            requests:
-              storage: 1Gi
-    - name: docker-credentials
-      secret:
-        secretName: acr-credentials
-"@ | kubectl apply -f -
-```
-
-## Steg 6: Övervaka Pipeline
-
-```powershell
-# Lista alla PipelineRuns
+# Eller se status
 kubectl get pipelineruns
-
-# Se status för senaste run
-kubectl get pipelineruns --sort-by=.metadata.creationTimestamp
-
-# Se detaljer
-kubectl describe pipelinerun <pipelinerun-name>
-
-# Följ logs (kräver tkn CLI)
-tkn pipelinerun logs <pipelinerun-name> -f
-
-# Eller via kubectl
-kubectl logs -l tekton.dev/pipelineRun=<pipelinerun-name> -f
 ```
 
-## Steg 7: Installera Tekton CLI (tkn) - Valfritt
+## Steg 5: Öppna Dashboard (valfritt)
 
 ```powershell
-# Via Chocolatey
-choco install tektoncd-cli
-
-# Eller ladda ner manuellt från
-# https://github.com/tektoncd/cli/releases
+# Port-forward till dashboard
+kubectl port-forward svc/tekton-dashboard -n tekton-pipelines 9097:9097
 ```
 
-Med tkn CLI:
+Öppna http://localhost:9097 i webbläsaren.
+
+## Manuell PipelineRun (alternativ)
+
+Om du inte vill använda `test-pipelinerun.yaml`, skapa en manuellt:
 
 ```powershell
-# Lista pipelines
-tkn pipeline list
-
-# Starta pipeline interaktivt
-tkn pipeline start aks-webapp-pipeline --showlog
-
-# Lista runs
-tkn pipelinerun list
-
-# Se logs
-tkn pipelinerun logs -f
+@"
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  generateName: manual-run-
+  namespace: default
+spec:
+  pipelineRef:
+    name: aks-webapp-simple
+  params:
+    - name: git-url
+      value: "https://github.com/gusbogSogeti/WebAppAKS.git"
+    - name: git-revision
+      value: "main"
+    - name: image-url
+      value: "aksgbo.azurecr.io/aks-webapp"
+    - name: image-tag
+      value: "latest"
+  workspaces:
+    - name: shared-workspace
+      emptyDir: {}
+    - name: docker-credentials
+      secret:
+        secretName: acr-credentials
+"@ | kubectl create -f -
 ```
 
-## Steg 8: Öppna Tekton Dashboard
+## Verifiera Deployment
 
 ```powershell
-# Port forward till dashboard
-kubectl port-forward -n tekton-pipelines service/tekton-dashboard 9097:9097
+# Kontrollera att poddar kör
+kubectl get pods -l app.kubernetes.io/name=aks-webapp
 
-# Öppna i webbläsare
-start http://localhost:9097
+# Kontrollera service
+kubectl get svc aks-webapp
+
+# Testa appen
+curl http://20.123.122.15
 ```
-
-## Steg 9: Konfigurera GitHub Webhook (Valfritt)
-
-```powershell
-# Först, installera triggers
-kubectl apply -f tekton/triggers.yaml
-
-# Skapa webhook secret
-kubectl create secret generic github-webhook-secret `
-  --from-literal=secretToken=YOUR_SECRET_TOKEN `
-  --namespace=default
-
-# Hitta EventListener service URL
-kubectl get svc -n default | Select-String eventlistener
-
-# Använd denna URL i GitHub webhook settings
-```
-
-I GitHub repository:
-1. Gå till Settings → Webhooks → Add webhook
-2. Payload URL: `http://<EVENTLISTENER-IP>`
-3. Content type: `application/json`
-4. Secret: samma som `YOUR_SECRET_TOKEN`
-5. Events: "Just the push event"
 
 ## Felsökning
 
+### Problem: Permission denied
 ```powershell
-# Kontrollera Tekton pods
-kubectl get pods -n tekton-pipelines
-
-# Se events
-kubectl get events --sort-by=.metadata.creationTimestamp
-
-# Se logs för en specifik task
-kubectl logs <pod-name> -c step-<step-name>
-
-# Ta bort en PipelineRun
-kubectl delete pipelinerun <pipelinerun-name>
-
-# Ta bort alla gamla runs
-kubectl delete pipelinerun --all
+# Kontrollera att ServiceAccount har rätt RBAC
+kubectl get rolebindings
+kubectl describe rolebinding tekton-build-sa-binding
 ```
 
-## Nästa Steg
+### Problem: Kan inte klona repo
+```powershell
+# Verifiera att repo är public
+git ls-remote https://github.com/gusbogSogeti/WebAppAKS.git
+```
 
-- [ ] Testa manuell pipeline-körning
-- [ ] Installera Tekton Dashboard
-- [ ] Konfigurera GitHub webhooks för automatiska builds
-- [ ] Anpassa pipeline-parametrar i `tekton/pipeline.yaml`
-- [ ] Lägg till fler tasks (testing, security scanning, etc.)
+### Problem: Kan inte pusha till ACR
+```powershell
+# Verifiera ACR credentials
+kubectl get secret acr-credentials -o jsonpath='{.data.\.dockerconfigjson}' | base64 -d
+```
+
+## Nästa steg
+
+- Konfigurera GitHub webhooks för automatisk triggning
+- Sätt upp olika miljöer (dev/staging/prod)
+- Lägg till tester i pipelinen

@@ -2,37 +2,53 @@
 
 Detta är ett Helm chart för att deploya AKS WebApp till Kubernetes.
 
+**Status:** ✅ Fungerar  
+**App URL:** http://20.123.122.15  
+**Helm Release:** aks-webapp (revision 4+)
+
+## Snabbstart
+
+```powershell
+# Installera
+helm install aks-webapp ./helm/aks-webapp
+
+# Uppgradera
+helm upgrade aks-webapp ./helm/aks-webapp
+
+# Se status
+helm status aks-webapp
+```
+
 ## Installation
 
 ### Förutsättningar
-- Helm 3.x installerat
+- Helm 3.x eller 4.x installerat
 - kubectl konfigurerad mot ditt AKS cluster
 - Tillgång till Azure Container Registry (ACR)
 
 ### Installera Helm (om inte redan installerat)
-```bash
-# Windows (PowerShell)
-choco install kubernetes-helm
-
-# Eller via winget
+```powershell
+# Via winget (rekommenderat)
 winget install Helm.Helm
+
+# Eller via Chocolatey
+choco install kubernetes-helm
 ```
 
 ### Deploya med Helm
 
 #### 1. Validera chartet
-```bash
-# Från root-katalogen av projektet
+```powershell
 helm lint helm/aks-webapp
 ```
 
 #### 2. Dry-run för att se vad som kommer skapas
-```bash
+```powershell
 helm install aks-webapp helm/aks-webapp --dry-run --debug
 ```
 
 #### 3. Installera chartet
-```bash
+```powershell
 # Standard installation
 helm install aks-webapp helm/aks-webapp
 
@@ -44,13 +60,13 @@ helm install aks-webapp helm/aks-webapp -f custom-values.yaml
 ```
 
 #### 4. Uppgradera en befintlig release
-```bash
+```powershell
 helm upgrade aks-webapp helm/aks-webapp
 
 # Med specifik image tag
 helm upgrade aks-webapp helm/aks-webapp --set image.tag=v1.2.3
 
-# Eller om du vill installera om helt
+# Installera om helt
 helm upgrade --install aks-webapp helm/aks-webapp
 ```
 
@@ -121,43 +137,43 @@ autoscaling:
 ```
 
 Använd sedan:
-```bash
+```powershell
 helm install aks-webapp helm/aks-webapp -f custom-values.yaml
 ```
 
 ## Miljöspecifika deployer
 
 ### Development
-```bash
-helm install aks-webapp-dev helm/aks-webapp \
-  --namespace dev \
-  --create-namespace \
-  --set replicaCount=1 \
+```powershell
+helm install aks-webapp-dev helm/aks-webapp `
+  --namespace dev `
+  --create-namespace `
+  --set replicaCount=1 `
   --set image.tag=dev-latest
 ```
 
 ### Staging
-```bash
-helm install aks-webapp-staging helm/aks-webapp \
-  --namespace staging \
-  --create-namespace \
-  --set replicaCount=2 \
+```powershell
+helm install aks-webapp-staging helm/aks-webapp `
+  --namespace staging `
+  --create-namespace `
+  --set replicaCount=2 `
   --set image.tag=staging-v1.0.0
 ```
 
 ### Production
-```bash
-helm install aks-webapp-prod helm/aks-webapp \
-  --namespace production \
-  --create-namespace \
-  --set replicaCount=3 \
-  --set autoscaling.enabled=true \
+```powershell
+helm install aks-webapp-prod helm/aks-webapp `
+  --namespace production `
+  --create-namespace `
+  --set replicaCount=3 `
+  --set autoscaling.enabled=true `
   --set image.tag=v1.0.0
 ```
 
 ## Hantera releases
 
-```bash
+```powershell
 # Lista installerade releases
 helm list
 
@@ -182,41 +198,36 @@ helm uninstall aks-webapp --keep-history
 
 ## Testa chartet
 
-```bash
-# Kör alla tester
-helm test aks-webapp
-
+```powershell
 # Template ut filerna för inspektion
 helm template aks-webapp helm/aks-webapp > output.yaml
 ```
 
-## Paketeera chartet
+## Paketera chartet
 
-```bash
+```powershell
 # Skapa ett chart package
 helm package helm/aks-webapp
 
 # Detta skapar: aks-webapp-0.1.0.tgz
 ```
 
-## Integration med GitHub Actions
+## Integration med CI/CD
 
-För att integrera med din befintliga GitHub Actions workflow, uppdatera `.github/workflows/deploy.yml`:
+### GitHub Actions
+Se `.github/workflows/deploy-helm.yml` för Helm-baserad GitHub Actions workflow.
 
-```yaml
-- name: Deploy with Helm
-  run: |
-    helm upgrade --install aks-webapp ./helm/aks-webapp \
-      --namespace production \
-      --create-namespace \
-      --set image.tag=${{ github.sha }} \
-      --wait \
-      --timeout 5m
+### Tekton Pipeline
+Se `tekton/pipeline-simple.yaml` för Tekton pipeline som använder Helm för deployment.
+
+```powershell
+# Kör Tekton pipeline
+kubectl create -f tekton/test-pipelinerun.yaml
 ```
 
 ## Felsökning
 
-```bash
+```powershell
 # Se alla resurser som skapats av Helm
 kubectl get all -l app.kubernetes.io/instance=aks-webapp
 
@@ -241,3 +252,19 @@ helm get values aks-webapp --all
 4. **Använd namespaces** för att separera miljöer
 5. **Versionshantera dina custom values-filer**
 6. **Använd `--dry-run`** innan du deployar till produktion
+
+## Filstruktur
+
+```
+helm/aks-webapp/
+├── Chart.yaml              # Chart metadata
+├── values.yaml             # Default values
+├── .helmignore             # Filer att ignorera
+└── templates/
+    ├── _helpers.tpl        # Template helpers
+    ├── deployment.yaml     # Deployment manifest
+    ├── service.yaml        # Service manifest
+    ├── serviceaccount.yaml # ServiceAccount
+    ├── networkpolicy.yaml  # NetworkPolicy
+    └── hpa.yaml            # HorizontalPodAutoscaler
+```

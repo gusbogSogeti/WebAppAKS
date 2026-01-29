@@ -2,6 +2,9 @@
 
 Detta projekt innehåller nu stöd för både **Helm Charts** och **Tekton Pipelines**.
 
+**Status:** ✅ Allt fungerar  
+**App URL:** http://20.123.122.15
+
 ## 📦 Helm Charts
 
 Helm är ett pakethanteringsverktyg för Kubernetes som gör det enkelt att deploya och hantera applikationer.
@@ -11,15 +14,13 @@ Helm är ett pakethanteringsverktyg för Kubernetes som gör det enkelt att depl
 - `helm/aks-webapp/values.yaml` - Konfigurationsfil
 - `helm/aks-webapp/templates/` - Kubernetes manifests som templates
 
-### Fördelar med Helm:
-- ✅ Återanvändbar konfiguration
-- ✅ Enkel hantering av olika miljöer (dev/staging/prod)
-- ✅ Versionering och rollback-möjligheter
-- ✅ Templating för dynamiska värden
-- ✅ Paketerad distribution
+### Status
+- ✅ Helm 4.1.0 installerat
+- ✅ Chart deployat (revision 4+)
+- ✅ App kör på http://20.123.122.15
 
 ### Snabbstart med Helm:
-```bash
+```powershell
 # Installera chartet
 helm install aks-webapp ./helm/aks-webapp
 
@@ -37,37 +38,37 @@ helm rollback aks-webapp
 Tekton är en cloud-native CI/CD-lösning som körs direkt i Kubernetes-klustret.
 
 ### Vad har skapats?
-- `tekton/pipeline.yaml` - Huvudpipeline för build och deploy
-- `tekton/task-helm-upgrade.yaml` - Custom task för Helm deployment
-- `tekton/triggers.yaml` - GitHub webhook integration
-- `tekton/rbac.yaml` - Säkerhetsinställningar
+- `tekton/pipeline-simple.yaml` - ✅ Fungerande pipeline (inline tasks)
+- `tekton/serviceaccount.yaml` - ServiceAccount med RBAC för Helm
+- `tekton/test-pipelinerun.yaml` - Färdig PipelineRun för test
+
+### Status
+- ✅ Tekton Pipelines installerat
+- ✅ Tekton Dashboard installerat
+- ✅ Pipeline fungerar (build + deploy)
+- ✅ ACR-push fungerar
+- ✅ Helm deploy fungerar
 
 ### Pipeline-steg:
-1. **Fetch Repository** - Klonar Git-repo
-2. **Build & Push Image** - Bygger Docker-image med Kaniko
-3. **Deploy with Helm** - Deployar med Helm chart
-4. **Verify Deployment** - Kontrollerar att deployment lyckades
-
-### Fördelar med Tekton:
-- ✅ Körs native i Kubernetes
-- ✅ Ingen extern CI/CD-server behövs
-- ✅ Skalbar och molnagnostisk
-- ✅ Reusable tasks från Tekton Catalog
-- ✅ GitOps-friendly
+1. **build-and-push** - Klonar Git-repo, bygger Docker-image med Kaniko, pushar till ACR
+2. **deploy** - Klonar repo, kör Helm upgrade
 
 ### Snabbstart med Tekton:
-```bash
-# Installera Tekton
-kubectl apply -f https://storage.googleapis.com/tekton-releases/pipeline/latest/release.yaml
-
-# Installera projekt-resurser
-kubectl apply -f tekton/
+```powershell
+# Installera resurser
+kubectl apply -f tekton/serviceaccount.yaml
+kubectl apply -f tekton/pipeline-simple.yaml
 
 # Kör pipeline
-tkn pipeline start aks-webapp-pipeline --showlog
+kubectl create -f tekton/test-pipelinerun.yaml
+
+# Följ loggar
+tkn pipelinerun logs -f --last
 ```
 
-📖 **Läs mer:** [tekton/README.md](tekton/README.md)
+📖 **Läs mer:** [tekton/README.md](tekton/README.md)  
+📖 **Quickstart:** [tekton/QUICKSTART.md](tekton/QUICKSTART.md)  
+📖 **Status:** [tekton/STATUS.md](tekton/STATUS.md)
 
 ## 🔀 Jämförelse: Helm vs Tekton vs GitHub Actions
 
@@ -85,44 +86,17 @@ tkn pipeline start aks-webapp-pipeline --showlog
 ### Använd GitHub Actions när:
 - Du vill ha enkel setup och komma igång snabbt
 - Du redan använder GitHub
-- Du inte har komplicerata deployment-behov
-- Du vill minimal overhead
+- Du inte har komplicerade deployment-behov
 
 ### Använd Helm när:
 - Du behöver deploya till flera miljöer (dev/staging/prod)
 - Du vill ha versionering och rollback
 - Du behöver återanvändbara konfigurationer
-- Du vill separera deployment från CI
 
 ### Använd Tekton när:
 - Du vill ha hela CI/CD direkt i Kubernetes
 - Du behöver cloud-native lösning
 - Du vill undvika externa CI/CD-tjänster
-- Du arbetar med multi-cloud eller on-premise
-
-## 🚀 Kombinera lösningarna
-
-Du kan också kombinera dessa verktyg:
-
-### Option 1: GitHub Actions + Helm
-```yaml
-# .github/workflows/deploy-helm.yml (redan skapad!)
-- name: Deploy with Helm
-  run: |
-    helm upgrade --install aks-webapp ./helm/aks-webapp \
-      --set image.tag=${{ github.sha }}
-```
-
-### Option 2: Tekton + Helm
-Tekton pipeline använder redan Helm för deployment (se `tekton/pipeline.yaml`).
-
-### Option 3: GitHub Actions triggar Tekton
-```yaml
-- name: Trigger Tekton Pipeline
-  run: |
-    tkn pipeline start aks-webapp-pipeline \
-      --param git-revision=${{ github.sha }}
-```
 
 ## 📁 Projektstruktur
 
@@ -132,7 +106,7 @@ WebAppAKS/
 │   ├── Dockerfile
 │   ├── aks-deployment.yaml       # Original K8s manifest
 │   └── network-policy.yaml
-├── helm/                         # 📦 Helm Charts (NYT!)
+├── helm/                         # 📦 Helm Charts
 │   ├── README.md
 │   └── aks-webapp/
 │       ├── Chart.yaml
@@ -142,45 +116,57 @@ WebAppAKS/
 │           ├── service.yaml
 │           ├── networkpolicy.yaml
 │           └── hpa.yaml
-├── tekton/                       # 🔄 Tekton Pipelines (NYT!)
+├── tekton/                       # 🔄 Tekton Pipelines
 │   ├── README.md
-│   ├── pipeline.yaml
-│   ├── task-helm-upgrade.yaml
-│   ├── triggers.yaml
-│   └── rbac.yaml
+│   ├── QUICKSTART.md
+│   ├── STATUS.md
+│   ├── pipeline-simple.yaml      # ✅ Fungerande pipeline
+│   ├── serviceaccount.yaml       # RBAC för Helm
+│   ├── test-pipelinerun.yaml     # Test PipelineRun
+│   ├── pipeline.yaml             # Original (workspace-problem)
+│   ├── task-*.yaml               # Separata tasks
+│   └── triggers.yaml
 └── .github/workflows/
     ├── deploy.yml                # Original workflow
-    └── deploy-helm.yml           # Helm-baserad workflow (NYT!)
+    └── deploy-helm.yml           # Helm-baserad workflow
 ```
 
-## 🔧 Nästa steg
+## 🔧 Konfiguration
 
-1. **Testa Helm lokalt:**
-   ```bash
-   helm install aks-webapp ./helm/aks-webapp --dry-run --debug
-   ```
+### ACR
+- **Registry:** aksgbo.azurecr.io
+- **Image:** aksgbo.azurecr.io/aks-webapp:latest
+- **Secret:** acr-credentials
 
-2. **Installera Tekton i ditt AKS-kluster:**
-   ```bash
-   kubectl apply -f https://storage.googleapis.com/tekton-releases/pipeline/latest/release.yaml
-   ```
+### AKS
+- **Cluster:** akscluster
+- **Resource Group:** aksrg
 
-3. **Välj din deployment-strategi:**
-   - Fortsätt med GitHub Actions (enklast)
-   - Byt till GitHub Actions + Helm (rekommenderat)
-   - Gå full cloud-native med Tekton
+### GitHub
+- **Repo:** https://github.com/gusbogSogeti/WebAppAKS.git
+- **Synlighet:** Public (krävs för Tekton utan credentials)
 
-4. **Konfigurera secrets:**
-   - ACR credentials
-   - GitHub webhook tokens (för Tekton)
+## 🚀 Deployment Options
+
+### Option 1: GitHub Actions + Helm (Enklast)
+```powershell
+# Push till main-branch triggar automatisk deploy
+git push origin main
+```
+
+### Option 2: Manuell Helm
+```powershell
+helm upgrade --install aks-webapp ./helm/aks-webapp
+```
+
+### Option 3: Tekton Pipeline (Cloud-native)
+```powershell
+kubectl create -f tekton/test-pipelinerun.yaml
+```
 
 ## 📚 Resurser
 
 - [Helm Documentation](https://helm.sh/docs/)
 - [Tekton Documentation](https://tekton.dev/docs/)
-- [Tekton Catalog](https://hub.tekton.dev/)
+- [Tekton Hub](https://hub.tekton.dev/)
 - [AKS Best Practices](https://learn.microsoft.com/azure/aks/)
-
-## 🤝 Bidra
-
-Har du förbättringsförslag? Skapa en PR eller öppna en issue!

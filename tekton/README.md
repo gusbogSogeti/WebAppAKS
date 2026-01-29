@@ -1,133 +1,176 @@
 # Tekton CI/CD Setup för AKS WebApp
 
+## Översikt
+
+Tekton är en cloud-native CI/CD-lösning som körs direkt i Kubernetes-klustret.
+
+**Status:** ✅ Fungerar  
+**App URL:** http://20.123.122.15
+
+## Snabbstart
+
+```powershell
+# Kör pipelinen
+kubectl apply -f tekton/serviceaccount.yaml
+kubectl apply -f tekton/pipeline-simple.yaml
+kubectl create -f tekton/test-pipelinerun.yaml
+
+# Följ loggar
+tkn pipelinerun logs -f --last
+```
+
 ## Installation
 
 ### 1. Installera Tekton Pipelines
-```bash
-# Installera Tekton Pipelines
-kubectl apply --filename https://storage.googleapis.com/tekton-releases/pipeline/latest/release.yaml
 
-# Installera Tekton Triggers
-kubectl apply --filename https://storage.googleapis.com/tekton-releases/triggers/latest/release.yaml
-kubectl apply --filename https://storage.googleapis.com/tekton-releases/triggers/latest/interceptors.yaml
+```powershell
+# Installera Tekton Pipelines
+kubectl apply -f https://storage.googleapis.com/tekton-releases/pipeline/latest/release.yaml
 
 # Installera Tekton Dashboard (valfritt)
-kubectl apply --filename https://storage.googleapis.com/tekton-releases/dashboard/latest/release.yaml
+kubectl apply -f https://storage.googleapis.com/tekton-releases/dashboard/latest/release.yaml
 ```
 
-### 2. Installera nödvändiga ClusterTasks
-```bash
-# Git Clone task
-kubectl apply -f https://raw.githubusercontent.com/tektoncd/catalog/main/task/git-clone/0.9/git-clone.yaml
+### 2. Skapa ACR credentials secret
 
-# Kaniko task (för att bygga Docker images)
-kubectl apply -f https://raw.githubusercontent.com/tektoncd/catalog/main/task/kaniko/0.6/kaniko.yaml
+```powershell
+# Hämta credentials
+$ACR_USERNAME = az acr credential show --name aksgbo --query username -o tsv
+$ACR_PASSWORD = az acr credential show --name aksgbo --query passwords[0].value -o tsv
 
-# Kubernetes actions task
-kubectl apply -f https://raw.githubusercontent.com/tektoncd/catalog/main/task/kubernetes-actions/0.2/kubernetes-actions.yaml
+# Skapa secret
+kubectl create secret docker-registry acr-credentials `
+  --docker-server=aksgbo.azurecr.io `
+  --docker-username=$ACR_USERNAME `
+  --docker-password=$ACR_PASSWORD
 ```
 
-### 3. Skapa Docker credentials secret för ACR
-```bash
-# För Azure Container Registry
-kubectl create secret docker-registry acr-credentials \
-  --docker-server=aksgbo.azurecr.io \
-  --docker-username=<ACR_USERNAME> \
-  --docker-password=<ACR_PASSWORD> \
-  --namespace=default
+### 3. Installera Pipeline-resurser
+
+```powershell
+# ServiceAccount med RBAC (krävs för Helm)
+kubectl apply -f tekton/serviceaccount.yaml
+
+# Fungerande pipeline
+kubectl apply -f tekton/pipeline-simple.yaml
 ```
 
-### 4. Skapa GitHub webhook secret (för triggers)
-```bash
-kubectl create secret generic github-webhook-secret \
-  --from-literal=secretToken=<YOUR_GITHUB_WEBHOOK_SECRET> \
-  --namespace=default
+## Kör Pipeline
+
+### Med test-pipelinerun.yaml
+
+```powershell
+kubectl create -f tekton/test-pipelinerun.yaml
 ```
 
-### 5. Installera Tekton-resurser för projektet
-```bash
-# Installera RBAC
-kubectl apply -f tekton/rbac.yaml
+### Manuellt
 
-# Installera Tasks
-kubectl apply -f tekton/task-helm-upgrade.yaml
-
-# Installera Pipeline
-kubectl apply -f tekton/pipeline.yaml
-
-# Installera Triggers
-kubectl apply -f tekton/triggers.yaml
-```
-
-## Kör Pipeline manuellt
-
-```bash
-# Skapa en PipelineRun
-kubectl create -f - <<EOF
-apiVersion: tekton.dev/v1beta1
+```powershell
+@"
+apiVersion: tekton.dev/v1
 kind: PipelineRun
 metadata:
-  name: aks-webapp-run-$(date +%s)
-  namespace: default
+  generateName: aks-webapp-run-
 spec:
   pipelineRef:
-    name: aks-webapp-pipeline
+    name: aks-webapp-simple
   params:
     - name: git-url
-      value: https://github.com/YOUR_USERNAME/WebAppAKS.git
+      value: "https://github.com/gusbogSogeti/WebAppAKS.git"
     - name: git-revision
-      value: main
+      value: "main"
+    - name: image-url
+      value: "aksgbo.azurecr.io/aks-webapp"
+    - name: image-tag
+      value: "latest"
   workspaces:
     - name: shared-workspace
-      volumeClaimTemplate:
-        spec:
-          accessModes:
-            - ReadWriteOnce
-          resources:
-            requests:
-              storage: 1Gi
+      emptyDir: {}
     - name: docker-credentials
       secret:
         secretName: acr-credentials
-EOF
+"@ | kubectl create -f -
 ```
 
 ## Övervaka Pipeline
 
-```bash
+```powershell
 # Lista PipelineRuns
 kubectl get pipelineruns
 
-# Se detaljer för en specifik run
-kubectl describe pipelinerun <pipelinerun-name>
+# Se loggar för senaste körning
+tkn pipelinerun logs -f --last
 
-# Se logs
-tkn pipelinerun logs <pipelinerun-name> -f
-
-# Eller via Tekton Dashboard
-kubectl port-forward -n tekton-pipelines service/tekton-dashboard 9097:9097
-# Öppna http://localhost:9097
+# Öppna Dashboard
+kubectl port-forward svc/tekton-dashboard -n tekton-pipelines 9097:9097
+# Gå till http://localhost:9097
 ```
 
-## Konfigurera GitHub Webhook
+## Pipeline-struktur
 
-1. Hitta EventListener URL:
-```bash
-kubectl get svc -n default
+### pipeline-simple.yaml (Rekommenderad)
+
+Den fungerande pipelinen använder **inline tasks** för att undvika workspace-problem:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    aks-webapp-simple                            │
+├─────────────────────────────────────────────────────────────────┤
+│  1. build-and-push                                              │
+│     ├── Init: git clone                                         │
+│     └── Step: kaniko build & push                               │
+│                                                                 │
+│  2. deploy (runAfter: build-and-push)                           │
+│     ├── Step 1: git clone                                       │
+│     └── Step 2: helm upgrade --install                          │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-2. I ditt GitHub repo:
-   - Gå till Settings → Webhooks → Add webhook
-   - Payload URL: `http://<EVENTLISTENER_URL>`
-   - Content type: `application/json`
-   - Secret: samma som i `github-webhook-secret`
-   - Events: "Just the push event"
+### Filer
 
-## Tekton Dashboard
+| Fil | Beskrivning | Status |
+|-----|-------------|--------|
+| `pipeline-simple.yaml` | Huvudpipeline med inline tasks | ✅ Fungerar |
+| `serviceaccount.yaml` | ServiceAccount + RBAC för Helm | ✅ Krävs |
+| `test-pipelinerun.yaml` | Färdig PipelineRun för test | ✅ Fungerar |
+| `pipeline.yaml` | Original pipeline | ⚠️ Workspace-problem |
+| `task-*.yaml` | Separata tasks | ⚠️ Används ej |
+| `triggers.yaml` | GitHub webhooks | ⚠️ Ej testat |
 
-För att komma åt Tekton Dashboard:
-```bash
-kubectl port-forward -n tekton-pipelines service/tekton-dashboard 9097:9097
+## Felsökning
+
+### Pod har inte rätt permissions
+
+```powershell
+# Kontrollera RBAC
+kubectl describe rolebinding tekton-build-sa-binding
 ```
 
-Öppna sedan http://localhost:9097 i din webbläsare.
+### Kan inte klona från GitHub
+
+GitHub-repot måste vara **public** eller ha credentials konfigurerade.
+
+### Kaniko hittar inte Dockerfile
+
+Pipelinen klonar till `/workspace/source/AksWebApp/` och Dockerfile finns där.
+
+### Helm kan inte skapa resurser
+
+ServiceAccount behöver permissions för:
+- pods, services, configmaps, secrets
+- deployments, replicasets, statefulsets
+- networkpolicies, horizontalpodautoscalers
+- serviceaccounts, roles, rolebindings
+
+## Nästa steg
+
+1. **GitHub Webhooks** - Automatisk triggning vid push
+2. **Flera miljöer** - Dev/Staging/Production
+3. **Tester** - Lägg till test-steg i pipelinen
+4. **Notifications** - Slack/Teams-integration
+
+## Resurser
+
+- [Tekton Documentation](https://tekton.dev/docs/)
+- [Tekton Hub](https://hub.tekton.dev/)
+- [Kaniko](https://github.com/GoogleContainerTools/kaniko)
