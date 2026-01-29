@@ -1,0 +1,84 @@
+name: Build and Deploy to AKS with Helm
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+env:
+  ACR_NAME: aksgbo
+  ACR_REGISTRY: aksgbo.azurecr.io
+  IMAGE_NAME: aks-webapp
+  AKS_CLUSTER: akscluster
+  AKS_RESOURCE_GROUP: aksrg
+  HELM_RELEASE_NAME: aks-webapp
+  NAMESPACE: default
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Azure Login
+      uses: azure/login@v2
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Build and push image to ACR
+      run: |
+        cd AksWebApp
+        az acr build --image ${{ env.ACR_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
+                     --image ${{ env.ACR_REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
+                     --registry ${{ env.ACR_NAME }} \
+                     --file Dockerfile .
+
+    - name: Get AKS credentials
+      run: |
+        az aks get-credentials --resource-group ${{ env.AKS_RESOURCE_GROUP }} \
+                                --name ${{ env.AKS_CLUSTER }} \
+                                --overwrite-existing
+
+    - name: Install Helm
+      uses: azure/setup-helm@v4
+      with:
+        version: 'latest'
+
+    - name: Deploy to AKS with Helm
+      run: |
+        helm upgrade --install ${{ env.HELM_RELEASE_NAME }} ./helm/aks-webapp \
+          --namespace ${{ env.NAMESPACE }} \
+          --create-namespace \
+          --set image.tag=${{ github.sha }} \
+          --set image.registry=${{ env.ACR_REGISTRY }} \
+          --set image.repository=${{ env.IMAGE_NAME }} \
+          --wait \
+          --timeout 5m
+
+    - name: Verify deployment
+      run: |
+        echo "Deployment completed successfully!"
+        kubectl get all -n ${{ env.NAMESPACE }} -l app.kubernetes.io/instance=${{ env.HELM_RELEASE_NAME }}
+        kubectl get svc -n ${{ env.NAMESPACE }} -l app.kubernetes.io/instance=${{ env.HELM_RELEASE_NAME }}
+        
+    - name: Get application URL
+      run: |
+        echo "Waiting for LoadBalancer IP..."
+        kubectl wait --for=jsonpath='{.status.loadBalancer.ingress}' \
+          service/${{ env.HELM_RELEASE_NAME }}-aks-webapp \
+          -n ${{ env.NAMESPACE }} \
+          --timeout=300s || true
+        
+        EXTERNAL_IP=$(kubectl get svc ${{ env.HELM_RELEASE_NAME }}-aks-webapp \
+          -n ${{ env.NAMESPACE }} \
+          -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+        
+        if [ -n "$EXTERNAL_IP" ]; then
+          echo "Application is available at: http://$EXTERNAL_IP"
+        else
+          echo "LoadBalancer IP not yet assigned. Check later with: kubectl get svc -n ${{ env.NAMESPACE }}"
+        fi

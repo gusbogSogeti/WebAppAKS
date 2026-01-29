@@ -1,0 +1,30 @@
+---
+# Simple test PipelineRun - visar Tekton i action
+apiVersion: tekton.dev/v1beta1
+kind: PipelineRun
+metadata:
+  name: test-simple-run
+  namespace: default
+spec:
+  serviceAccountName: tekton-build-sa
+  pipelineRef:
+    name: aks-webapp-pipeline
+  params:
+    - name: git-url
+      value: https://github.com/gbogerSogeti/WebAppAKS.git  # Uppdatera till din GitHub URL
+    - name: git-revision
+      value: main
+    - name: image-registry
+      value: aksgbo.azurecr.io
+    - name: image-name
+      value: aks-webapp
+    - name: deployment-namespace
+      value: default
+    - name: helm-release-name
+      value: aks-webapp
+  workspaces:
+    - name: shared-workspace
+      emptyDir: {}
+    - name: docker-credentials
+      secret:
+        secretName: acr-credentials

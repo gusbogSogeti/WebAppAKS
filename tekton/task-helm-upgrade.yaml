@@ -1,0 +1,62 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: helm-upgrade
+  namespace: default
+spec:
+  params:
+    - name: release_name
+      description: The helm release name
+      type: string
+    - name: release_namespace
+      description: The namespace to deploy to
+      type: string
+      default: default
+    - name: chart_path
+      description: Path to the Helm chart
+      type: string
+    - name: values_file
+      description: Path to values file
+      type: string
+      default: ""
+    - name: overwrite_values
+      description: Values to override (key=value format)
+      type: string
+      default: ""
+    - name: helm_version
+      description: Helm version to use
+      type: string
+      default: "latest"
+
+  workspaces:
+    - name: source
+      description: The workspace containing the chart
+
+  steps:
+    - name: helm-upgrade
+      image: alpine/helm:$(params.helm_version)
+      workingDir: $(workspaces.source.path)
+      script: |
+        #!/bin/sh
+        set -ex
+        
+        echo "Installing/Upgrading Helm release: $(params.release_name)"
+        
+        HELM_CMD="helm upgrade --install $(params.release_name) $(params.chart_path) \
+          --namespace $(params.release_namespace) \
+          --create-namespace \
+          --wait \
+          --timeout 5m"
+        
+        if [ -n "$(params.values_file)" ]; then
+          HELM_CMD="$HELM_CMD -f $(params.values_file)"
+        fi
+        
+        if [ -n "$(params.overwrite_values)" ]; then
+          HELM_CMD="$HELM_CMD --set $(params.overwrite_values)"
+        fi
+        
+        eval $HELM_CMD
+        
+        echo "Deployment successful!"
+        helm list -n $(params.release_namespace)

@@ -1,0 +1,110 @@
+apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  name: aks-webapp-pipeline
+  namespace: default
+spec:
+  params:
+    - name: git-url
+      type: string
+      description: Git repository URL
+      default: https://github.com/gusbogSogeti/WebAppAKS.git
+    - name: git-revision
+      type: string
+      description: Git revision to build
+      default: main
+    - name: image-registry
+      type: string
+      description: Container registry URL
+      default: aksgbo.azurecr.io
+    - name: image-name
+      type: string
+      description: Image name
+      default: aks-webapp
+    - name: deployment-namespace
+      type: string
+      description: Namespace to deploy to
+      default: default
+    - name: helm-release-name
+      type: string
+      description: Helm release name
+      default: aks-webapp
+
+  workspaces:
+    - name: shared-workspace
+      description: Workspace for source code and artifacts
+    - name: docker-credentials
+      description: Docker credentials for ACR
+
+  tasks:
+    # Task 1: Clone repository
+    - name: fetch-repository
+      taskRef:
+        name: git-clone
+      workspaces:
+        - name: output
+          workspace: shared-workspace
+      params:
+        - name: url
+          value: $(params.git-url)
+        - name: revision
+          value: $(params.git-revision)
+        - name: deleteExisting
+          value: "true"
+
+    # Task 2: Build and push Docker image
+    - name: build-push-image
+      taskRef:
+        name: kaniko
+      runAfter:
+        - fetch-repository
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+        - name: dockerconfig
+          workspace: docker-credentials
+      params:
+        - name: IMAGE
+          value: $(params.image-registry)/$(params.image-name):$(tasks.fetch-repository.results.commit)
+        - name: DOCKERFILE
+          value: ./AksWebApp/Dockerfile
+        - name: CONTEXT
+          value: ./AksWebApp
+        - name: EXTRA_ARGS
+          value:
+            - --destination=$(params.image-registry)/$(params.image-name):latest
+            - --build-arg=BUILDKIT_INLINE_CACHE=1
+
+    # Task 3: Deploy with Helm
+    - name: deploy-helm
+      taskRef:
+        name: helm-upgrade
+      runAfter:
+        - build-push-image
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+      params:
+        - name: release_name
+          value: $(params.helm-release-name)
+        - name: release_namespace
+          value: $(params.deployment-namespace)
+        - name: chart_path
+          value: ./helm/aks-webapp
+        - name: values_file
+          value: ./helm/aks-webapp/values.yaml
+        - name: overwrite_values
+          value: image.tag=$(tasks.fetch-repository.results.commit)
+
+    # Task 4: Verify deployment
+    - name: verify-deployment
+      taskRef:
+        name: kubernetes-actions
+      runAfter:
+        - deploy-helm
+      params:
+        - name: script
+          value: |
+            kubectl rollout status deployment/$(params.helm-release-name)-aks-webapp -n $(params.deployment-namespace)
+            kubectl get pods -n $(params.deployment-namespace) -l app.kubernetes.io/name=aks-webapp
+            kubectl get svc -n $(params.deployment-namespace) -l app.kubernetes.io/name=aks-webapp
