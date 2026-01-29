@@ -1,0 +1,60 @@
+name: Build and Deploy to AKS
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+env:
+  ACR_NAME: aksgbo
+  ACR_REGISTRY: aksgbo.azurecr.io
+  IMAGE_NAME: aks-webapp
+  AKS_CLUSTER: akscluster
+  AKS_RESOURCE_GROUP: aksrg
+  DEPLOYMENT_MANIFEST_PATH: './AksWebApp/aks-deployment.yaml'
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Azure Login
+      uses: azure/login@v2
+      with:
+        client-id: ${{ secrets.AZURE_CLIENT_ID }}
+        tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+        subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      # Alternative: Use service principal if admin creates it
+      # with:
+      #   creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Build and push image to ACR
+      run: |
+        cd AksWebApp
+        az acr build --image ${{ env.ACR_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
+                     --image ${{ env.ACR_REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
+                     --registry ${{ env.ACR_NAME }} \
+                     --file Dockerfile .
+
+    - name: Get AKS credentials
+      run: |
+        az aks get-credentials --resource-group ${{ env.AKS_RESOURCE_GROUP }} \
+                                --name ${{ env.AKS_CLUSTER }} \
+                                --overwrite-existing
+
+    - name: Deploy to AKS
+      run: |
+        kubectl apply -f ${{ env.DEPLOYMENT_MANIFEST_PATH }}
+        kubectl apply -f ./AksWebApp/network-policy.yaml
+        kubectl rollout status deployment/aks-webapp
+        kubectl get services aks-webapp-service
+
+    - name: Verify deployment
+      run: |
+        echo "Deployment completed successfully!"
+        kubectl get pods -l app=aks-webapp
